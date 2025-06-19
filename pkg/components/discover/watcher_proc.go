@@ -48,6 +48,12 @@ type ProcessAttrs struct {
 	metadata       map[string]string
 	podLabels      map[string]string
 	podAnnotations map[string]string
+	// Name of the process
+	processName string
+	// Status of the process
+	processStatus string
+	// Age of the process
+	processAge time.Duration
 }
 
 func wplog() *slog.Logger {
@@ -96,7 +102,7 @@ type pollAccounter struct {
 	// same process might appear several times
 	pidPorts map[pidPort]ProcessAttrs
 	// injectable function
-	listProcesses func(bool) (map[PID]ProcessAttrs, error)
+	listProcesses func(bool, time.Duration) (map[PID]ProcessAttrs, error)
 	// injectable function
 	executableReady func(PID) (string, bool)
 	// injectable function to load the bpf program
@@ -133,7 +139,7 @@ func (pa *pollAccounter) run(ctx context.Context) {
 	go pa.watchForProcessEvents(ctx, log, bpfWatchEvents)
 
 	for {
-		procs, err := pa.listProcesses(pa.portFetchRequired())
+		procs, err := pa.listProcesses(pa.portFetchRequired(), pa.cfg.Discovery.MinProcessAge)
 		if err != nil {
 			log.Warn("can't get system processes", "error", err)
 		} else {
@@ -211,6 +217,7 @@ func (pa *pollAccounter) watchForProcessEvents(ctx context.Context, log *slog.Lo
 // snapshot compares the current processes with the status of the previous poll
 // and forwards a list of process creation/deletion events
 func (pa *pollAccounter) snapshot(fetchedProcs map[PID]ProcessAttrs) []Event[ProcessAttrs] {
+	log := wplog()
 	var events []Event[ProcessAttrs]
 	currentPidPorts := make(map[pidPort]ProcessAttrs, len(fetchedProcs))
 	reportedProcs := map[PID]struct{}{}
@@ -222,11 +229,13 @@ func (pa *pollAccounter) snapshot(fetchedProcs map[PID]ProcessAttrs) []Event[Pro
 		if len(proc.openPorts) == 0 {
 			if pa.checkNewProcessNotification(pid, reportedProcs, notReadyProcs) {
 				events = append(events, Event[ProcessAttrs]{Type: EventCreated, Obj: proc})
+				log.Debug("Process added", "pid", pid, "name", proc.processName, "status", proc.processStatus, "age", proc.processAge.Round(time.Second))
 			}
 		} else {
 			for _, port := range proc.openPorts {
 				if pa.checkNewProcessConnectionNotification(proc, port, currentPidPorts, reportedProcs, notReadyProcs) {
 					events = append(events, Event[ProcessAttrs]{Type: EventCreated, Obj: proc})
+					log.Debug("Process added", "pid", pid, "name", proc.processName, "status", proc.processStatus, "age", proc.processAge.Round(time.Second), "port", port)
 					// skip checking new connections for that process
 					continue
 				}
@@ -237,6 +246,7 @@ func (pa *pollAccounter) snapshot(fetchedProcs map[PID]ProcessAttrs) []Event[Pro
 	for pid, proc := range pa.pids {
 		if _, ok := fetchedProcs[pid]; !ok {
 			events = append(events, Event[ProcessAttrs]{Type: EventDeleted, Obj: proc})
+			log.Debug("Process removed", "pid", pid, "name", proc.processName, "status", proc.processStatus, "age", proc.processAge.Round(time.Second))
 		}
 	}
 
@@ -325,7 +335,7 @@ func (pa *pollAccounter) checkNewProcessNotification(pid PID, reportedProcs, not
 
 // fetchProcessConnections returns a map with the PIDs of all the running processes as a key,
 // and the open ports for the given process as a value
-func fetchProcessPorts(scanPorts bool) (map[PID]ProcessAttrs, error) {
+func fetchProcessPorts(scanPorts bool, minProcessAge time.Duration) (map[PID]ProcessAttrs, error) {
 	log := wplog()
 	processes := map[PID]ProcessAttrs{}
 	pids, err := process.Pids()
@@ -334,8 +344,35 @@ func fetchProcessPorts(scanPorts bool) (map[PID]ProcessAttrs, error) {
 	}
 
 	for _, pid := range pids {
+		proc, err := process.NewProcess(pid)
+		if err != nil {
+			continue
+		}
+		createTime, err := proc.CreateTime()
+		if err != nil {
+			continue
+		}
+		// Print the process name
+		processName, err := proc.Name()
+		if err != nil {
+			continue
+		}
+		// Process status
+		status, err := proc.Status()
+		if err != nil {
+			continue
+		}
+
+		startTime := time.UnixMilli(createTime)
+		duration := time.Since(startTime)
+
+		// Check if the process is running for more than the minProcessAge
+		if duration < minProcessAge {
+			log.Debug("Skipping process", "pid", pid, "name", processName, "status", status, "age", duration.Round(time.Microsecond))
+			continue
+		}
 		if !scanPorts {
-			processes[PID(pid)] = ProcessAttrs{pid: PID(pid), openPorts: []uint32{}}
+			processes[PID(pid)] = ProcessAttrs{pid: PID(pid), openPorts: []uint32{}, processName: processName, processStatus: status[0], processAge: duration}
 			continue
 		}
 		conns, err := net.ConnectionsPid("inet", pid)
@@ -348,7 +385,7 @@ func fetchProcessPorts(scanPorts bool) (map[PID]ProcessAttrs, error) {
 		for _, conn := range conns {
 			openPorts = append(openPorts, conn.Laddr.Port)
 		}
-		processes[PID(pid)] = ProcessAttrs{pid: PID(pid), openPorts: openPorts}
+		processes[PID(pid)] = ProcessAttrs{pid: PID(pid), openPorts: openPorts, processName: processName, processStatus: status[0], processAge: duration}
 	}
 	return processes, nil
 }
