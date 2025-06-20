@@ -3,6 +3,7 @@ package discover
 import (
 	"bytes"
 	"context"
+	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -252,4 +253,70 @@ func sort(events []Event[ProcessAttrs]) []Event[ProcessAttrs] {
 		return int(a.Obj.pid) - int(b.Obj.pid)
 	})
 	return events
+}
+
+func TestMinProcessAge(t *testing.T) {
+	// Negative test: process is younger than minProcessAge
+	// Create a process in OS running sleep 1 second
+	process, err := os.StartProcess("/bin/sleep", []string{"/bin/sleep", "1"}, &os.ProcAttr{
+		Dir:   "/",
+		Env:   os.Environ(),
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+	})
+	require.NoError(t, err)
+	defer func() {
+		if err := process.Kill(); err != nil {
+			t.Logf("Failed to kill process1: %v", err)
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+
+	procs, err := fetchProcessPorts(false, 5*time.Second)
+	require.NoError(t, err)
+	// process1.Pid should not be in the map, but other processes can be
+	_, ok := procs[PID(process.Pid)]
+	assert.False(t, ok)
+
+	// Positive test: process is not older than minProcessAge but we are scanning ports
+	// Create a process in OS running sleep 3 seconds
+	process1, err := os.StartProcess("/bin/sleep", []string{"/bin/sleep", "3"}, &os.ProcAttr{
+		Dir:   "/",
+		Env:   os.Environ(),
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+	})
+	require.NoError(t, err)
+	defer func() {
+		if err := process1.Kill(); err != nil {
+			t.Logf("Failed to kill process1: %v", err)
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+
+	procs, err = fetchProcessPorts(true, 5*time.Second)
+	require.NoError(t, err)
+	// process1.Pid should not be in the map, but other processes can be
+	_, ok = procs[PID(process1.Pid)]
+	assert.True(t, ok)
+
+	// Positive test: process is older than minProcessAge
+	process2, err := os.StartProcess("/bin/sleep", []string{"/bin/sleep", "3"}, &os.ProcAttr{
+		Dir:   "/",
+		Env:   os.Environ(),
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+	})
+	require.NoError(t, err)
+	defer func() {
+		if err := process2.Kill(); err != nil {
+			t.Logf("Failed to kill process2: %v", err)
+		}
+	}()
+
+	time.Sleep(2500 * time.Millisecond)
+
+	procs, err = fetchProcessPorts(true, 2*time.Second)
+	require.NoError(t, err)
+	_, ok = procs[PID(process2.Pid)]
+	assert.True(t, ok)
 }

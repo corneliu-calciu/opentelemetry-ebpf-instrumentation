@@ -133,6 +133,7 @@ var DefaultConfig = Config{
 				Path: services.NewGlob(glob.MustCompile("{*beyla,*alloy,*ebpf-instrument,*otelcol,*otelcol-contrib,*otelcol-contrib[!/]*}")),
 			},
 		},
+		MinProcessAge: 5 * time.Second,
 	},
 }
 

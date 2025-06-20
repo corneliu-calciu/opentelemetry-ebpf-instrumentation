@@ -94,7 +94,7 @@ type DiscoveryConfig struct {
 
 	// Min process age to be considered for discovery.
 	//nolint:undoc
-	MinProcessAge time.Duration `yaml:"min_process_age" env:"BEYLA_MIN_PROCESS_AGE"`
+	MinProcessAge time.Duration `yaml:"min_process_age" env:"OTEL_EBPF_MIN_PROCESS_AGE"`
 }
 
 func (c *DiscoveryConfig) Validate() error {
