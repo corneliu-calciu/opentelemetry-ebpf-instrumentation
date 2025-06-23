@@ -10,21 +10,8 @@
 
 #include <generictracer/protocol_common.h>
 
-// Keeps track of tcp buffers for unknown protocols
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __type(key, pid_connection_info_t);
-    __type(value, tcp_req_t);
-    __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, BEYLA_PIN_INTERNAL);
-} ongoing_tcp_req SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, int);
-    __type(value, tcp_req_t);
-    __uint(max_entries, 1);
-} tcp_req_mem SEC(".maps");
+#include <generictracer/maps/ongoing_tcp_req.h>
+#include <generictracer/maps/tcp_req_mem.h>
 
 static __always_inline tcp_req_t *empty_tcp_req() {
     int zero = 0;
@@ -150,6 +137,7 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
 
         tcp_req_t *req = empty_tcp_req();
         if (req) {
+            bpf_clamp_umax(bytes_len, K_TCP_MAX_LEN);
             req->flags = EVENT_TCP_REQUEST;
             req->conn_info = pid_conn->conn;
             fixup_connection_info(&req->conn_info, direction, orig_dport);
@@ -162,7 +150,7 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
             req->req_len = req->len;
             req->extra_id = extra_runtime_id();
             task_pid(&req->pid);
-            bpf_probe_read(req->buf, K_TCP_MAX_LEN, u_buf);
+            bpf_probe_read(req->buf, bytes_len, u_buf);
 
             req->tp.ts = bpf_ktime_get_ns();
 
@@ -174,6 +162,7 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
         }
     } else if (existing->direction != direction) {
         if (existing->end_monotime_ns == 0) {
+            bpf_clamp_umax(bytes_len, K_TCP_RES_LEN);
             existing->end_monotime_ns = bpf_ktime_get_ns();
             existing->resp_len = bytes_len;
             tcp_req_t *trace = bpf_ringbuf_reserve(&events, sizeof(tcp_req_t), 0);
@@ -182,7 +171,7 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
                     "Sending TCP trace %lx, response length %d", existing, existing->resp_len);
 
                 __builtin_memcpy(trace, existing, sizeof(tcp_req_t));
-                bpf_probe_read(trace->rbuf, K_TCP_RES_LEN, u_buf);
+                bpf_probe_read(trace->rbuf, bytes_len, u_buf);
                 bpf_ringbuf_submit(trace, get_flags());
             } else {
                 bpf_printk("failed to reserve space on the ringbuf");

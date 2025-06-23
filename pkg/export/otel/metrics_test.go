@@ -510,6 +510,14 @@ func TestMetricsConfig_Enabled(t *testing.T) {
 	assert.True(t, (&MetricsConfig{Features: []string{FeatureApplication, FeatureNetwork}, CommonEndpoint: "foo"}).Enabled())
 	assert.True(t, (&MetricsConfig{Features: []string{FeatureApplication}, MetricsEndpoint: "foo"}).Enabled())
 	assert.True(t, (&MetricsConfig{MetricsEndpoint: "foo", Features: []string{FeatureNetwork}}).Enabled())
+	assert.True(t, (&MetricsConfig{
+		Features:             []string{FeatureNetwork},
+		OTLPEndpointProvider: func() (string, bool) { return "something", false },
+	}).Enabled())
+	assert.True(t, (&MetricsConfig{
+		Features:             []string{FeatureNetwork},
+		OTLPEndpointProvider: func() (string, bool) { return "something", true },
+	}).Enabled())
 }
 
 func TestMetricsConfig_Disabled(t *testing.T) {
@@ -519,9 +527,13 @@ func TestMetricsConfig_Disabled(t *testing.T) {
 	// application feature is not enabled
 	assert.False(t, (&MetricsConfig{CommonEndpoint: "foo"}).Enabled())
 	assert.False(t, (&MetricsConfig{}).Enabled())
+	assert.False(t, (&MetricsConfig{
+		Features:             []string{FeatureApplication},
+		OTLPEndpointProvider: func() (string, bool) { return "", false },
+	}).Enabled())
 }
 
-func TestSpanMetricsDiscarded(t *testing.T) {
+func TestMetricsDiscarded(t *testing.T) {
 	mc := MetricsConfig{
 		Features: []string{FeatureApplication},
 	}
@@ -561,7 +573,52 @@ func TestSpanMetricsDiscarded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.discarded, !otelSpanAccepted(&tt.span, &mr), tt.name)
+			assert.Equal(t, tt.discarded, !otelMetricsAccepted(&tt.span, &mr), tt.name)
+		})
+	}
+}
+
+func TestSpanMetricsDiscarded(t *testing.T) {
+	mc := MetricsConfig{
+		Features: []string{FeatureApplication},
+	}
+	mr := MetricsReporter{
+		cfg: &mc,
+	}
+
+	svcNoExport := svc.Attrs{}
+
+	svcExportMetrics := svc.Attrs{}
+	svcExportMetrics.SetExportsOTelMetrics()
+
+	svcExportSpanMetrics := svc.Attrs{}
+	svcExportSpanMetrics.SetExportsOTelMetricsSpan()
+
+	tests := []struct {
+		name      string
+		span      request.Span
+		discarded bool
+	}{
+		{
+			name:      "Foo span is not filtered",
+			span:      request.Span{Service: svcNoExport, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/foo", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/metrics span is not filtered",
+			span:      request.Span{Service: svcExportMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/metrics", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/traces span is filtered",
+			span:      request.Span{Service: svcExportSpanMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/traces", RequestStart: 100, End: 200},
+			discarded: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.discarded, !otelSpanMetricsAccepted(&tt.span, &mr), tt.name)
 		})
 	}
 }
