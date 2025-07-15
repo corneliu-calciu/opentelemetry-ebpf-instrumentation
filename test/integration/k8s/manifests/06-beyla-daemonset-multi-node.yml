@@ -13,13 +13,15 @@ data:
     log_level: debug
     discovery:
       instrument:
-        - open_ports: 8083
+        - open_ports: 7773
           namespace: integration-test
         - open_ports: 3040
           namespace: integration-test
         - exe_path: "/testserver"
           namespace: integration-test
     routes:
+      patterns:
+         - /jsonrpc
       unmatched: heuristic
     otel_metrics_export:
       endpoint: http://otelcol:4318

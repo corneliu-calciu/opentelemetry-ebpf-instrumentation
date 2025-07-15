@@ -28,7 +28,7 @@ func TestTCPReqSQLParsing(t *testing.T) {
 	op, table, sql := detectSQL(sql)
 	assert.Equal(t, "SELECT", op)
 	assert.Equal(t, "accounts", table)
-	s := TCPToSQLToSpan(&r, op, table, sql, request.DBGeneric)
+	s := TCPToSQLToSpan(&r, op, table, sql, request.DBGeneric, []byte{}, []byte{}, "")
 	assert.NotNil(t, s)
 	assert.NotEmpty(t, s.Host)
 	assert.NotEmpty(t, s.Peer)
@@ -107,10 +107,10 @@ func TestReadTCPRequestIntoSpan_Overflow(t *testing.T) {
 	}
 
 	cfg := config.EBPFTracer{HeuristicSQLDetect: true}
-
+	ctx := NewEBPFParseContext(&cfg)
 	binaryRecord := bytes.Buffer{}
 	require.NoError(t, binary.Write(&binaryRecord, binary.LittleEndian, tri))
-	span, ignore, err := ReadTCPRequestIntoSpan(&cfg, &ringbuf.Record{RawSample: binaryRecord.Bytes()}, &fltr)
+	span, ignore, err := ReadTCPRequestIntoSpan(ctx, &cfg, &ringbuf.Record{RawSample: binaryRecord.Bytes()}, &fltr)
 	require.NoError(t, err)
 	require.False(t, ignore)
 

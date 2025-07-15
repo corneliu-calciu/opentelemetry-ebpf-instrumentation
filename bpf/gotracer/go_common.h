@@ -18,6 +18,7 @@
 #include <common/go_addr_key.h>
 #include <common/map_sizing.h>
 #include <common/pin_internal.h>
+#include <common/strings.h>
 #include <common/trace_util.h>
 #include <common/tracing.h>
 
@@ -119,18 +120,6 @@ typedef struct grpc_header_field {
     u64 sensitive;
 } grpc_header_field_t;
 
-// assumes s2 is all lowercase
-static __always_inline int bpf_memicmp(const char *s1, const char *s2, s32 size) {
-    for (int i = 0; i < size; i++) {
-        if (s1[i] != s2[i] && s1[i] != (s2[i] - 32)) // compare with each uppercase character
-        {
-            return i + 1;
-        }
-    }
-
-    return 0;
-}
-
 static __always_inline u8 valid_trace(const unsigned char *trace_id) {
     return *((u64 *)trace_id) != 0 || *((u64 *)(trace_id + 8)) != 0;
 }
@@ -192,14 +181,14 @@ static __always_inline u64 find_parent_goroutine_in_chain(go_addr_key_t *current
     return 0;
 }
 
-static __always_inline void decode_go_traceparent(unsigned char *buf,
+static __always_inline void decode_go_traceparent(const unsigned char *buf,
                                                   unsigned char *trace_id,
                                                   unsigned char *span_id,
                                                   unsigned char *flags) {
-    unsigned char *t_id = buf + 2 + 1; // strlen(ver) + strlen("-")
-    unsigned char *s_id =
+    const unsigned char *t_id = buf + 2 + 1; // strlen(ver) + strlen("-")
+    const unsigned char *s_id =
         buf + 2 + 1 + 32 + 1; // strlen(ver) + strlen("-") + strlen(trace_id) + strlen("-")
-    unsigned char *f_id =
+    const unsigned char *f_id =
         buf + 2 + 1 + 32 + 1 + 16 +
         1; // strlen(ver) + strlen("-") + strlen(trace_id) + strlen("-") + strlen(span_id) + strlen("-")
 
@@ -278,6 +267,31 @@ server_trace_parent(void *goroutine_addr, tp_info_t *tp, tp_info_t *found_tp) {
     bpf_dbg_printk("tp: %s", tp_buf);
 }
 
+static __always_inline tp_info_t *tp_info_from_parent_go(go_addr_key_t *g_key, u64 *parent_found) {
+    tp_info_t *tp = 0;
+
+    u64 parent_id = find_parent_goroutine(g_key);
+    go_addr_key_t p_key = {};
+    go_addr_key_from_id(&p_key, (void *)parent_id);
+
+    if (parent_id) { // we found a parent request
+        tp = (tp_info_t *)bpf_map_lookup_elem(&go_trace_map, &p_key);
+    }
+
+    if (tp) {
+        bpf_dbg_printk("Found parent request trace_parent %llx", tp);
+        if (parent_found) {
+            *parent_found = parent_id;
+        }
+    }
+
+    return tp;
+}
+
+static __always_inline void update_tp_parent_go(go_addr_key_t *gp_key, tp_info_t *tp) {
+    bpf_map_update_elem(&go_trace_map, gp_key, tp, BPF_ANY);
+}
+
 static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *tp_i) {
     u8 found_trace_id = 0;
 
@@ -298,18 +312,9 @@ static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *t
     }
 
     if (!found_trace_id) {
-        tp_info_t *tp = 0;
-
-        u64 parent_id = find_parent_goroutine(&g_key);
-        go_addr_key_t p_key = {};
-        go_addr_key_from_id(&p_key, (void *)parent_id);
-
-        if (parent_id) { // we found a parent request
-            tp = (tp_info_t *)bpf_map_lookup_elem(&go_trace_map, &p_key);
-        }
+        tp_info_t *tp = tp_info_from_parent_go(&g_key, 0);
 
         if (tp) {
-            bpf_dbg_printk("Found parent request trace_parent %llx", tp);
             tp_from_parent(tp_i, tp);
         } else {
             urand_bytes(tp_i->trace_id, TRACE_ID_SIZE_BYTES);
@@ -448,7 +453,7 @@ static __always_inline void process_meta_frame_headers(void *frame, tp_info_t *t
                 unsigned char temp[W3C_VAL_LENGTH];
 
                 bpf_probe_read(&temp, W3C_KEY_LENGTH, field.key_ptr);
-                if (!bpf_memicmp((const char *)temp, "traceparent", W3C_KEY_LENGTH)) {
+                if (stricmp((const char *)temp, "traceparent", W3C_KEY_LENGTH)) {
                     //bpf_dbg_printk("found grpc traceparent header");
                     bpf_probe_read(&temp, W3C_VAL_LENGTH, field.val_ptr);
                     decode_go_traceparent(temp, tp->trace_id, tp->parent_id, &tp->flags);

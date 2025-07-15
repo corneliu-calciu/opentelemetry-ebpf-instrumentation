@@ -11,12 +11,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/beyla"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/obi"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/docker"
 )
 
 func kprobeTracesEnabled() bool {
-	major, minor := beyla.KernelVersion()
+	major, minor := obi.KernelVersion()
 
 	return major > 5 || (major == 5 && minor >= 17)
 }
@@ -24,16 +24,20 @@ func kprobeTracesEnabled() bool {
 func TestSuite(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose.yml", path.Join(pathOutput, "test-suite.log"))
 	require.NoError(t, err)
+	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=(pingclient|testserver)`)
 	require.NoError(t, compose.Up())
 	t.Run("RED metrics", testREDMetricsHTTP)
+	t.Run("RED JSON RPC metrics", testREDMetricsJSONRPCHTTP)
 	t.Run("HTTP traces", testHTTPTraces)
 	t.Run("HTTP traces (no traceID)", testHTTPTracesNoTraceID)
+	t.Run("HTTP traces (manual spans)", testHTTPTracesNestedManualSpans)
 	t.Run("GRPC traces", testGRPCTraces)
 	t.Run("GRPC RED metrics", testREDMetricsGRPC)
 	t.Run("GRPC TLS RED metrics", testREDMetricsGRPCTLS)
 	t.Run("Internal Prometheus metrics", testInternalPrometheusExport)
 	t.Run("Exemplars exist", testExemplarsExist)
 	t.Run("Testing Host Info metric", testHostInfo)
+	t.Run("Client RED metrics", testREDMetricsForClientHTTPLibrary)
 
 	require.NoError(t, compose.Close())
 }
@@ -58,15 +62,6 @@ func TestSuiteNestedTraces(t *testing.T) {
 		t.Run("HTTP traces (nested client span)", testHTTPTracesNestedClient)
 		t.Run("HTTP -> gRPC traces (nested client span)", testHTTP2GRPCTracesNestedCallsNoPropagation)
 	}
-	require.NoError(t, compose.Close())
-}
-
-func TestSuiteClient(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-client.yml", path.Join(pathOutput, "test-suite-client.log"))
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=pingclient`)
-	require.NoError(t, err)
-	require.NoError(t, compose.Up())
-	t.Run("Client RED metrics", testREDMetricsForClientHTTPLibrary)
 	require.NoError(t, compose.Close())
 }
 
@@ -125,6 +120,7 @@ func TestSuite_OldestGoVersion(t *testing.T) {
 	t.Run("HTTP traces", testHTTPTraces)
 	t.Run("GRPC traces", testGRPCTraces)
 	t.Run("GRPC RED metrics", testREDMetricsGRPC)
+	t.Run("HTTP traces (manual spans)", testHTTPTracesNestedManualSpans)
 	t.Run("Internal Prometheus metrics", testInternalPrometheusExport)
 
 	require.NoError(t, compose.Close())
@@ -173,21 +169,6 @@ func TestSuite_GRPCExportKProbes(t *testing.T) {
 
 	t.Run("trace GRPC service and export as GRPC traces - kprobes", testGRPCKProbeTraces)
 	t.Run("GRPC RED metrics - kprobes", testREDMetricsGRPC)
-
-	require.NoError(t, compose.Close())
-}
-
-// Same as Test suite, but searching the executable by port instead of executable name
-func TestSuite_OpenPort(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose.yml", path.Join(pathOutput, "test-suite-openport.log"))
-	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`)
-	require.NoError(t, err)
-	require.NoError(t, compose.Up())
-	t.Run("RED metrics", testREDMetricsHTTP)
-	t.Run("HTTP traces", testHTTPTraces)
-	t.Run("GRPC traces", testGRPCTraces)
-	t.Run("GRPC RED metrics", testREDMetricsGRPC)
-	t.Run("Internal Prometheus metrics", testInternalPrometheusExport)
 
 	require.NoError(t, compose.Close())
 }
@@ -373,6 +354,24 @@ func TestSuite_PythonSQL(t *testing.T) {
 	require.NoError(t, compose.Close())
 }
 
+func TestSuite_PythonRedis(t *testing.T) {
+	compose, err := docker.ComposeSuite("docker-compose-python-redis.yml", path.Join(pathOutput, "test-suite-python-redis.log"))
+	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`)
+	require.NoError(t, err)
+	require.NoError(t, compose.Up())
+	t.Run("Python Redis metrics", testREDMetricsPythonRedisOnly)
+	require.NoError(t, compose.Close())
+}
+
+func TestSuite_PythonMongo(t *testing.T) {
+	compose, err := docker.ComposeSuite("docker-compose-python-mongo.yml", path.Join(pathOutput, "test-suite-python-mongo.log"))
+	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`)
+	require.NoError(t, err)
+	require.NoError(t, compose.Up())
+	t.Run("Python Mongo metrics", testREDMetricsPythonMongoOnly)
+	require.NoError(t, compose.Close())
+}
+
 func TestSuite_PythonSQLSSL(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-python-sql-ssl.yml", path.Join(pathOutput, "test-suite-python-sql-ssl.log"))
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`)
@@ -393,7 +392,7 @@ func TestSuite_PythonTLS(t *testing.T) {
 
 func TestSuite_PythonSelfReference(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-python-self.yml", path.Join(pathOutput, "test-suite-python-self.log"))
-	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8081`, `OTEL_EBPF_EXECUTABLE_PATH=`)
+	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=7771`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, err)
 	require.NoError(t, compose.Up())
 	t.Run("Python Traces with self-references", testHTTPTracesNestedSelfCalls)

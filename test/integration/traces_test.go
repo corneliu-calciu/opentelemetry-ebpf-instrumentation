@@ -148,7 +148,7 @@ func testHTTPTracesCommon(t *testing.T, doTraceID bool, httpCode int) {
 	jaeger.Diff([]jaeger.Tag{
 		{Key: "otel.library.name", Type: "string", Value: "github.com/open-telemetry/opentelemetry-ebpf-instrumentation"},
 		{Key: "telemetry.sdk.language", Type: "string", Value: "go"},
-		{Key: "telemetry.sdk.name", Type: "string", Value: "beyla"},
+		{Key: "telemetry.sdk.name", Type: "string", Value: "opentelemetry-ebpf-instrumentation"},
 		{Key: "service.namespace", Type: "string", Value: "integration-test"},
 		serviceInstance,
 	}, process.Tags)
@@ -360,7 +360,7 @@ func testHTTPTracesKProbes(t *testing.T) {
 	jaeger.Diff([]jaeger.Tag{
 		{Key: "otel.library.name", Type: "string", Value: "github.com/open-telemetry/opentelemetry-ebpf-instrumentation"},
 		{Key: "telemetry.sdk.language", Type: "string", Value: "nodejs"},
-		{Key: "telemetry.sdk.name", Type: "string", Value: "beyla"},
+		{Key: "telemetry.sdk.name", Type: "string", Value: "opentelemetry-ebpf-instrumentation"},
 		{Key: "service.namespace", Type: "string", Value: "integration-test"},
 		serviceInstance,
 	}, process.Tags)
@@ -652,10 +652,11 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 
 	waitForTestComponents(t, "http://localhost:3031")                 // nodejs
 	waitForTestComponents(t, "http://localhost:8080")                 // go
-	waitForTestComponents(t, "http://localhost:8183")                 // python
+	waitForTestComponents(t, "http://localhost:7773")                 // python
 	waitForRubyTestComponents(t, "http://localhost:3041")             // ruby
 	waitForTestComponentsSub(t, "http://localhost:8086", "/greeting") // java
 	waitForTestComponents(t, "http://localhost:8091")                 // rust
+	waitForTestComponents(t, instrumentedServiceJSONRPCURL)           // go jsonrpc
 
 	// Add and check for specific trace ID
 	// Run couple of requests to make sure we flush out any transactions that might be
@@ -664,8 +665,8 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 		doHTTPGet(t, "http://localhost:8091/dist", 200)
 	}
 
-	// rust   -> java     -> nodejs   -> go            -> python      -> rails
-	// /dist2 -> /jtrace2 -> /traceme -> /gotracemetoo -> /tracemetoo -> /users
+	// rust   -> java     -> nodejs   -> go            -> go jsonrpc -> python      -> rails
+	// /dist2 -> /jtrace2 -> /traceme -> /gotracemetoo -> /jsonrpc   -> /tracemetoo -> /users
 
 	// Get the first 5 traces
 	var multipleTraces []jaeger.Trace
@@ -765,6 +766,28 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 		)
 		assert.Empty(t, sd, sd.String())
 
+		/* FIXME flaky
+		// Check the information of the go jsonrpc parent span
+		res = trace.FindByOperationName("Arith.T /jsonrpc", "server")
+		require.Len(t, res, 1)
+		parent = res[0]
+		require.NotEmpty(t, parent.TraceID)
+		require.Equal(t, traceID, parent.TraceID)
+		require.NotEmpty(t, parent.SpanID)
+		// check duration is at least 2us
+		assert.Less(t, (2 * time.Microsecond).Microseconds(), parent.Duration)
+		// check span attributes
+		sd = parent.Diff(
+			jaeger.Tag{Key: "http.request.method", Type: "string", Value: "Arith.T"},
+			jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
+			jaeger.Tag{Key: "url.path", Type: "string", Value: "/jsonrpc"},
+			jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8088)},
+			jaeger.Tag{Key: "http.route", Type: "string", Value: "/jsonrpc"},
+			jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
+		)
+		assert.Empty(t, sd, sd.String())
+		*/
+
 		// Check the information of the python parent span
 		res = trace.FindByOperationName("GET /tracemetoo", "server")
 		require.Len(t, res, 1)
@@ -779,7 +802,7 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 			jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
 			jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
 			jaeger.Tag{Key: "url.path", Type: "string", Value: "/tracemetoo"},
-			jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8083)},
+			jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(7773)},
 			jaeger.Tag{Key: "http.route", Type: "string", Value: "/tracemetoo"},
 			jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
 		)
@@ -963,10 +986,10 @@ func testNestedHTTPSTracesKProbes(t *testing.T) {
 func testHTTPTracesNestedSelfCalls(t *testing.T) {
 	var parentID string
 
-	waitForTestComponentsRoute(t, "http://localhost:8083", "/smoke")
+	waitForTestComponentsRoute(t, "http://localhost:7773", "/smoke")
 
 	// Run a request, since we have a single app, we should see always all requests
-	doHTTPGet(t, "https://localhost:8081/api1", 200)
+	doHTTPGet(t, "https://localhost:7771/api1", 200)
 
 	var trace jaeger.Trace
 	test.Eventually(t, testTimeout, func(t require.TestingT) {
@@ -996,7 +1019,7 @@ func testHTTPTracesNestedSelfCalls(t *testing.T) {
 		jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
 		jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
 		jaeger.Tag{Key: "url.path", Type: "string", Value: "/api1"},
-		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8081)},
+		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(7771)},
 		jaeger.Tag{Key: "http.route", Type: "string", Value: "/api1"},
 		jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
 	)
@@ -1010,7 +1033,7 @@ func testHTTPTracesNestedSelfCalls(t *testing.T) {
 		jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
 		jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
 		jaeger.Tag{Key: "url.path", Type: "string", Value: "/api2"},
-		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8082)},
+		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(7772)},
 		jaeger.Tag{Key: "http.route", Type: "string", Value: "/api2"},
 		jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
 	)
@@ -1024,7 +1047,7 @@ func testHTTPTracesNestedSelfCalls(t *testing.T) {
 		jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
 		jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
 		jaeger.Tag{Key: "url.path", Type: "string", Value: "/api3"},
-		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8083)},
+		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(7773)},
 		jaeger.Tag{Key: "http.route", Type: "string", Value: "/api3"},
 		jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
 	)
@@ -1038,7 +1061,7 @@ func testHTTPTracesNestedSelfCalls(t *testing.T) {
 		jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
 		jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
 		jaeger.Tag{Key: "url.path", Type: "string", Value: "/api4"},
-		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8084)},
+		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(7774)},
 		jaeger.Tag{Key: "http.route", Type: "string", Value: "/api4"},
 		jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
 	)
@@ -1133,4 +1156,144 @@ func testHTTPTracesNestedNodeJSDistCalls(t *testing.T) {
 	assert.True(t, seenP)
 	assert.True(t, seenQ)
 	assert.True(t, seenR)
+}
+
+func testHTTPTracesNestedManualSpans(t *testing.T) {
+	waitForTestComponents(t, "http://localhost:8080")
+
+	doHTTPGet(t, "http://localhost:8080/manual", 200)
+	// Do some requests to make sure we see all events
+	for i := 0; i < 10; i++ {
+		doHTTPGet(t, "http://localhost:8082/metrics", 200)
+	}
+
+	var trace jaeger.Trace
+	test.Eventually(t, testTimeout, func(t require.TestingT) {
+		resp, err := http.Get(jaegerQueryURL + "?service=testserver&operation=GET%20%2Fmanual")
+		require.NoError(t, err)
+		if resp == nil {
+			return
+		}
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var tq jaeger.TracesQuery
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&tq))
+		traces := tq.FindBySpan(jaeger.Tag{Key: "url.path", Type: "string", Value: "/manual"})
+		require.Len(t, traces, 1)
+		trace = traces[0]
+	}, test.Interval(100*time.Millisecond))
+
+	// Check the information of the parent span
+	res := trace.FindByOperationName("GET /manual", "server")
+	require.Len(t, res, 1)
+	server := res[0]
+	require.NotEmpty(t, server.TraceID)
+	traceID := server.TraceID
+	parentSpanID := server.SpanID
+
+	// check span attributes
+	sd := server.Diff(
+		jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
+		jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(200)},
+		jaeger.Tag{Key: "url.path", Type: "string", Value: "/manual"},
+		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8080)},
+		jaeger.Tag{Key: "http.route", Type: "string", Value: "/manual"},
+		jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
+		jaeger.Tag{Key: "span.metrics.skip", Type: "bool", Value: bool(true)},
+	)
+	assert.Empty(t, sd, sd.String())
+
+	// Check the information of the "in queue" span
+	res = trace.FindByOperationName("in queue", "internal")
+	require.GreaterOrEqual(t, len(res), 1)
+
+	var queue *jaeger.Span
+
+	for i := range res {
+		r := &res[i]
+		// Check parenthood
+		p, ok := trace.ParentOf(r)
+
+		if ok {
+			if p.TraceID == traceID && p.SpanID == parentSpanID {
+				queue = r
+				break
+			}
+		}
+	}
+	require.NotNil(t, queue)
+	// check span attributes
+	sd = queue.Diff(
+		jaeger.Tag{Key: "span.kind", Type: "string", Value: "internal"},
+	)
+	assert.Empty(t, sd, sd.String())
+
+	// Check the information of the "processing" span
+	res = trace.FindByOperationName("processing", "internal")
+	require.GreaterOrEqual(t, len(res), 1)
+
+	var processing *jaeger.Span
+
+	for i := range res {
+		r := &res[i]
+		// Check parenthood
+		p, ok := trace.ParentOf(r)
+
+		if ok {
+			if p.TraceID == traceID && p.SpanID == parentSpanID {
+				processing = r
+				break
+			}
+		}
+	}
+
+	require.NotNil(t, processing)
+	sd = queue.Diff(
+		jaeger.Tag{Key: "span.kind", Type: "string", Value: "internal"},
+	)
+	assert.Empty(t, sd, sd.String())
+
+	res = trace.FindByOperationName("sig", "internal")
+	require.Len(t, res, 1)
+	sig := res[0]
+	// Check parenthood
+	p, ok := trace.ParentOf(&sig)
+	require.True(t, ok)
+	assert.Equal(t, processing.TraceID, p.TraceID)
+	assert.Equal(t, processing.SpanID, p.SpanID)
+	sd = sig.Diff(
+		jaeger.Tag{Key: "error", Type: "bool", Value: bool(true)},
+		jaeger.Tag{Key: "error message", Type: "string", Value: "some unknown error"},
+		jaeger.Tag{Key: "otel.status_code", Type: "string", Value: "ERROR"},
+		jaeger.Tag{Key: "impact", Type: "int64", Value: float64(11)},
+	)
+	assert.Empty(t, sd, sd.String())
+
+	res = trace.FindByOperationName("sig_inner 1", "internal")
+	require.Len(t, res, 1)
+	sigInner1 := res[0]
+	// Check parenthood
+	p, ok = trace.ParentOf(&sigInner1)
+	require.True(t, ok)
+	assert.Equal(t, sig.TraceID, p.TraceID)
+	assert.Equal(t, sig.SpanID, p.SpanID)
+	sd = sigInner1.Diff(
+		jaeger.Tag{Key: "user", Type: "string", Value: "user1"},
+		jaeger.Tag{Key: "admin", Type: "bool", Value: bool(true)},
+	)
+	assert.Empty(t, sd, sd.String())
+
+	res = trace.FindByOperationName("changed name", "internal")
+	require.Len(t, res, 1)
+	sigInner2 := res[0]
+	// Check parenthood
+	p, ok = trace.ParentOf(&sigInner2)
+	require.True(t, ok)
+	assert.Equal(t, sig.TraceID, p.TraceID)
+	assert.Equal(t, sig.SpanID, p.SpanID)
+	sd = sigInner2.Diff(
+		jaeger.Tag{Key: "test", Type: "string", Value: "append"},
+		jaeger.Tag{Key: "user", Type: "string", Value: "user2"},
+		jaeger.Tag{Key: "admin", Type: "bool", Value: bool(true)},
+	)
+	assert.Empty(t, sd, sd.String())
 }

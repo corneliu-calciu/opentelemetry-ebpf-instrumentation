@@ -13,11 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	otelsdk "go.opentelemetry.io/otel/sdk"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/beyla"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/buildinfo"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/instrumenter"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/obi"
 )
 
 func main() {
@@ -29,7 +31,7 @@ func main() {
 
 	slog.Info("OpenTelemetry eBPF Instrumentation", "Version", buildinfo.Version, "Revision", buildinfo.Revision, "OpenTelemetry SDK Version", otelsdk.Version())
 
-	if err := beyla.CheckOSSupport(); err != nil {
+	if err := obi.CheckOSSupport(); err != nil {
 		slog.Error("can't start OpenTelemetry eBPF Instrumentation", "error", err)
 		os.Exit(-1)
 	}
@@ -52,7 +54,7 @@ func main() {
 		os.Exit(-1)
 	}
 
-	if err := beyla.CheckOSCapabilities(config); err != nil {
+	if err := obi.CheckOSCapabilities(config); err != nil {
 		if config.EnforceSysCaps {
 			slog.Error("can't start OpenTelemetry eBPF Instrumentation", "error", err)
 			os.Exit(-1)
@@ -67,6 +69,15 @@ func main() {
 			err := http.ListenAndServe(fmt.Sprintf(":%d", config.ProfilePort), nil)
 			slog.Error("PProf HTTP listener stopped working", "error", err)
 		}()
+	}
+
+	if config.LogConfig {
+		configYaml, err := yaml.Marshal(config)
+		if err != nil {
+			slog.Warn("can't marshal configuration to YAML", "error", err)
+		}
+		slog.Info("Running OpenTelemetry eBPF Instrumentation with configuration")
+		fmt.Println(string(configYaml))
 	}
 
 	// Adding shutdown hook for graceful stop.
@@ -85,7 +96,7 @@ func main() {
 	}
 }
 
-func loadConfig(configPath *string) *beyla.Config {
+func loadConfig(configPath *string) *obi.Config {
 	var configReader io.ReadCloser
 	if configPath != nil && *configPath != "" {
 		var err error
@@ -95,7 +106,7 @@ func loadConfig(configPath *string) *beyla.Config {
 		}
 		defer configReader.Close()
 	}
-	config, err := beyla.LoadConfig(configReader)
+	config, err := obi.LoadConfig(configReader)
 	if err != nil {
 		slog.Error("wrong configuration", "error", err)
 		//nolint:gocritic

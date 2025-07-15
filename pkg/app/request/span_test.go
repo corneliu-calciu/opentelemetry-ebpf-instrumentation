@@ -38,6 +38,7 @@ func TestEventTypeString(t *testing.T) {
 		EventTypeKafkaClient: "KafkaClient",
 		EventTypeRedisServer: "RedisServer",
 		EventTypeKafkaServer: "KafkaServer",
+		EventTypeMongoClient: "MongoClient",
 		EventType(99):        "UNKNOWN (99)",
 	}
 
@@ -56,6 +57,7 @@ func TestKindString(t *testing.T) {
 		{Type: EventTypeGRPCClient}:                            "SPAN_KIND_CLIENT",
 		{Type: EventTypeSQLClient}:                             "SPAN_KIND_CLIENT",
 		{Type: EventTypeRedisClient}:                           "SPAN_KIND_CLIENT",
+		{Type: EventTypeMongoClient}:                           "SPAN_KIND_CLIENT",
 		{Type: EventTypeKafkaClient, Method: MessagingPublish}: "SPAN_KIND_PRODUCER",
 		{Type: EventTypeKafkaClient, Method: MessagingProcess}: "SPAN_KIND_CONSUMER",
 		{}: "SPAN_KIND_INTERNAL",
@@ -129,11 +131,16 @@ func TestSerializeJSONSpans(t *testing.T) {
 		{
 			eventType: EventTypeSQLClient,
 			attribs: map[string]any{
-				"serverAddr": "hostname",
-				"serverPort": "5678",
-				"operation":  "method",
-				"table":      "path",
-				"statement":  "statement",
+				"serverAddr":       "hostname",
+				"serverPort":       "5678",
+				"operation":        "method",
+				"table":            "path",
+				"statement":        "statement",
+				"errorCode":        "123",
+				"errorDescription": "SQL Server errored for command 'COM_QUERY': error_code=123 sql_state=s123 message=err123",
+				"errorMessage":     "err123",
+				"sqlCommand":       "QUERY",
+				"sqlState":         "s123",
 			},
 		},
 		{
@@ -163,6 +170,15 @@ func TestSerializeJSONSpans(t *testing.T) {
 				"clientId":   "otherns",
 			},
 		},
+		{
+			eventType: EventTypeMongoClient,
+			attribs: map[string]any{
+				"serverAddr": "hostname",
+				"serverPort": "5678",
+				"operation":  "method",
+				"table":      "path",
+			},
+		},
 	}
 
 	test := func(t *testing.T, tData *testData) {
@@ -189,6 +205,12 @@ func TestSerializeJSONSpans(t *testing.T) {
 			HostName:       "hostname",
 			OtherNamespace: "otherns",
 			Statement:      "statement",
+			SQLCommand:     "QUERY",
+			SQLError: &SQLError{
+				SQLState: "s123",
+				Message:  "err123",
+				Code:     123,
+			},
 		}
 
 		data, err := json.MarshalIndent(span, "", " ")
@@ -473,6 +495,18 @@ func TestHostPeerClientServer(t *testing.T) {
 			span:   Span{Type: EventTypeRedisServer, PeerName: "client", HostName: "server", OtherNamespace: "far", Service: svc.Attrs{UID: svc.UID{Namespace: "same"}}},
 			client: "client.far",
 			server: "server",
+		},
+		{
+			name:   "Same namespaces for Mongo client",
+			span:   Span{Type: EventTypeMongoClient, PeerName: "client", HostName: "server", OtherNamespace: "same", Service: svc.Attrs{UID: svc.UID{Namespace: "same"}}},
+			client: "client",
+			server: "server",
+		},
+		{
+			name:   "Server in different namespace Mongo",
+			span:   Span{Type: EventTypeMongoClient, PeerName: "client", HostName: "server", OtherNamespace: "far", Service: svc.Attrs{UID: svc.UID{Namespace: "same"}}},
+			client: "client",
+			server: "server.far",
 		},
 	}
 

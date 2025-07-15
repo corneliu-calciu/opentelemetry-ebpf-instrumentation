@@ -11,8 +11,13 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/jaeger"
 
 	"github.com/mariomac/guara/pkg/test"
 	"github.com/stretchr/testify/assert"
@@ -21,6 +26,41 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/prom"
 )
+
+/*
+TestCaseSpan represents a span that is expected to be produced by the instrumented service
+- Name: the name of the span (example: HSET)
+- Attributes: a list of attributes that are expected to be present in the span
+*/
+type TestCaseSpan struct {
+	Name       string
+	Attributes []attribute.KeyValue
+}
+
+func (span TestCaseSpan) FindAttribute(key string) *attribute.KeyValue {
+	for _, attr := range span.Attributes {
+		if strings.EqualFold(string(attr.Key), key) {
+			return &attr
+		}
+	}
+	return nil
+}
+
+/*
+TestCase represents a test case for the RED metrics, where calling an endpoint is expected to produce spans
+- Route: the URL of the instrumented service (example: http://localhost:8381)
+- Subpath: the subpath of the endpoint to call (without leading /) (example: redis)
+- Comm: the name of the instrumented service (example: python3.12)
+- Namespace: the namespace of the service (example: integration-test)
+- Spans: a list of spans that are expected to be produced by the instrumented service, each span has:
+*/
+type TestCase struct {
+	Route     string
+	Subpath   string
+	Comm      string
+	Namespace string
+	Spans     []TestCaseSpan
+}
 
 var tr = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -300,4 +340,18 @@ func waitForTestComponentsHTTP2Sub(t *testing.T, url, subpath string, minutes in
 		require.NoError(t, err)
 		require.NotEmpty(t, results)
 	}, test.Interval(time.Second))
+}
+
+func otelAttributeToJaegerTag(attr attribute.KeyValue) jaeger.Tag {
+	var value any
+	value = attr.Value.AsInterface()
+	if attr.Value.Type() == attribute.INT64 {
+		// jaeger encodes int64 as float64
+		value = float64(attr.Value.AsInt64())
+	}
+	return jaeger.Tag{
+		Key:   string(attr.Key),
+		Type:  strings.ToLower(attr.Value.Type().String()),
+		Value: value,
+	}
 }

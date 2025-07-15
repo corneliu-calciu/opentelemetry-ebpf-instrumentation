@@ -300,6 +300,21 @@ func TestAppMetrics_ByInstrumentation(t *testing.T) {
 				"db_client_operation_duration_seconds",
 			},
 		},
+		{
+			name:  "mongo",
+			instr: []string{instrumentations.InstrumentationMongo},
+			expected: []string{
+				"db_client_operation_duration_seconds",
+			},
+			unexpected: []string{
+				"http_server_request_duration_seconds",
+				"http_client_request_duration_seconds",
+				"rpc_server_duration_seconds",
+				"rpc_client_duration_seconds",
+				"messaging_publish_duration_seconds",
+				"messaging_process_duration_seconds",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -326,6 +341,7 @@ func TestAppMetrics_ByInstrumentation(t *testing.T) {
 				{Service: svc.Attrs{UID: svc.UID{Instance: "foo"}}, Type: request.EventTypeRedisServer, Method: "GET", RequestStart: 150, End: 175},
 				{Service: svc.Attrs{UID: svc.UID{Instance: "foo"}}, Type: request.EventTypeKafkaClient, Method: "publish", RequestStart: 150, End: 175},
 				{Service: svc.Attrs{UID: svc.UID{Instance: "foo"}}, Type: request.EventTypeKafkaServer, Method: "process", RequestStart: 150, End: 175},
+				{Service: svc.Attrs{UID: svc.UID{Instance: "foo"}}, Type: request.EventTypeMongoClient, Method: "find", RequestStart: 150, End: 175},
 			})
 
 			var exported string
@@ -592,4 +608,46 @@ func makePromExporter(
 	require.NoError(t, err)
 
 	return exporter
+}
+
+func TestSanitizeUTF8ForPrometheus(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		labelName string
+		expected  string
+	}{
+		{
+			name:     "valid UTF-8 string",
+			input:    "valid-string",
+			expected: "valid-string",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "binary data with null bytes",
+			input:    "deb.debian.or 1498318199  0     0     100644  828       `\n\x1f\x8b\b",
+			expected: "deb.debian.or 1498318199  0     0     100644  828       `\n\x1f\b",
+		},
+		{
+			name:     "string with invalid UTF-8 sequence",
+			input:    "test\xff\xfe",
+			expected: "test",
+		},
+		{
+			name:     "mixed valid and invalid UTF-8",
+			input:    "hello\xff\xfeworld",
+			expected: "helloworld",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeUTF8ForPrometheus(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

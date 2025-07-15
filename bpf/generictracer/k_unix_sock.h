@@ -7,7 +7,6 @@
 #include <common/tc_common.h>
 #include <common/tracing.h>
 
-#include <generictracer/ebpf_ipc.h>
 #include <generictracer/k_send_receive.h>
 #include <generictracer/k_tracer_defs.h>
 #include <generictracer/protocol_http.h>
@@ -58,7 +57,7 @@ int BPF_KPROBE(beyla_kprobe_unix_stream_recvmsg,
         return 0;
     }
 
-    bpf_printk("=== unix_stream recvmsg %d ===", id);
+    bpf_dbg_printk("=== unix_stream recvmsg %d ===", id);
 
     struct sock *sk;
     BPF_CORE_READ_INTO(&sk, sock, sk);
@@ -225,7 +224,7 @@ int BPF_KPROBE(beyla_kprobe_unix_stream_sendmsg,
         return 0;
     }
 
-    bpf_printk("=== unix_stream sendmsg %d ===", id);
+    bpf_dbg_printk("=== unix_stream sendmsg %d ===", id);
 
     struct sock *sk;
     BPF_CORE_READ_INTO(&sk, sock, sk);

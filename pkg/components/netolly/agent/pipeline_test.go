@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/beyla"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/ebpf"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/flow/transport"
@@ -20,6 +19,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/prom"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/filter"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/obi"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
 	prom2 "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/prom"
@@ -39,7 +39,7 @@ func TestFilter(t *testing.T) {
 		ctxInfo: &global.ContextInfo{
 			Prometheus: &connector.PrometheusManager{},
 		},
-		cfg: &beyla.Config{
+		cfg: &obi.Config{
 			Prometheus: prom.PrometheusConfig{
 				Path:     "/metrics",
 				Port:     promPort,
@@ -49,9 +49,9 @@ func TestFilter(t *testing.T) {
 			Filters: filter.AttributesConfig{
 				Network: map[string]filter.MatchDefinition{"transport": {Match: "TCP"}},
 			},
-			Attributes: beyla.Attributes{Select: attributes.Selection{
-				attributes.BeylaNetworkFlow.Section: attributes.InclusionLists{
-					Include: []string{"beyla_ip", "iface.direction", "dst_port", "iface", "src_port", "transport"},
+			Attributes: obi.Attributes{Select: attributes.Selection{
+				attributes.NetworkFlow.Section: attributes.InclusionLists{
+					Include: []string{"obi_ip", "iface.direction", "dst_port", "iface", "src_port", "transport"},
 				},
 			}},
 		},
@@ -92,11 +92,11 @@ func TestFilter(t *testing.T) {
 
 		// assuming metrics returned alphabetically ordered
 		assert.Equal(t, []prom2.ScrapedMetric{
-			{Name: "beyla_network_flow_bytes_total", Labels: map[string]string{
-				"beyla_ip": "1.2.3.4", "iface_direction": "ingress", "dst_port": "1011", "iface": "fakeiface", "src_port": "789", "transport": "TCP",
+			{Name: "obi_network_flow_bytes_total", Labels: map[string]string{
+				"obi_ip": "1.2.3.4", "iface_direction": "ingress", "dst_port": "1011", "iface": "fakeiface", "src_port": "789", "transport": "TCP",
 			}},
-			{Name: "beyla_network_flow_bytes_total", Labels: map[string]string{
-				"beyla_ip": "1.2.3.4", "iface_direction": "ingress", "dst_port": "1415", "iface": "fakeiface", "src_port": "1213", "transport": "TCP",
+			{Name: "obi_network_flow_bytes_total", Labels: map[string]string{
+				"obi_ip": "1.2.3.4", "iface_direction": "ingress", "dst_port": "1415", "iface": "fakeiface", "src_port": "1213", "transport": "TCP",
 			}},
 			// standard prometheus metrics. Leaving them here to simplify test verification
 			{Name: "promhttp_metric_handler_errors_total", Labels: map[string]string{"cause": "encoding"}},
