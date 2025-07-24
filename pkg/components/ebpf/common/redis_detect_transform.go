@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package ebpfcommon
 
 import (
@@ -10,9 +13,9 @@ import (
 
 	trace2 "go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/ringbuf"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/util"
+	"go.opentelemetry.io/obi/pkg/app/request"
+	"go.opentelemetry.io/obi/pkg/components/ebpf/ringbuf"
+	"go.opentelemetry.io/obi/pkg/components/split"
 )
 
 const minRedisFrameLen = 3
@@ -110,7 +113,7 @@ func isValidRedisChar(c byte) bool {
 func parseRedisRequest(buf string) (string, string, bool) {
 	const redisDelim = "\r\n"
 
-	lines := util.NewSplitIterator(buf, redisDelim)
+	lines := split.NewIterator(buf, redisDelim)
 
 	_, eof := lines.Next()
 

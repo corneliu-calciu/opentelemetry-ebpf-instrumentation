@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 package integration
@@ -14,8 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/docker"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/prom"
+	"go.opentelemetry.io/obi/test/integration/components/docker"
+	"go.opentelemetry.io/obi/test/integration/components/prom"
 )
 
 func TestMultiProcess(t *testing.T) {
@@ -72,7 +75,7 @@ func TestMultiProcess(t *testing.T) {
 	})
 
 	// do some requests to the server at port 18090, which must not be instrumented
-	// as the instrumenter-config-multiexec.yml file only selects the process with port 18080.
+	// as the obi-config-multiexec.yml file only selects the process with port 18080.
 	// Doing it early to give time to generate the traces (in case the test failed)
 	// while doing another test in between for the same container
 	test.Eventually(t, testTimeout, func(t require.TestingT) {
@@ -113,7 +116,7 @@ func TestMultiProcess(t *testing.T) {
 }
 
 func TestMultiProcessAppCP(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-tc.log"))
+	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-app-cp.log"))
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=all`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=1`)
 	require.NoError(t, err)
@@ -128,7 +131,7 @@ func TestMultiProcessAppCP(t *testing.T) {
 }
 
 func TestMultiProcessAppCPNoIP(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-tc.log"))
+	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-app-cp-no-ip.log"))
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=headers`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=1`)
 
@@ -184,7 +187,7 @@ func checkInstrumentedProcessesMetric(t *testing.T) {
 		}
 
 		for processName, expectedCount := range processes {
-			results, err := pq.Query(fmt.Sprintf(`beyla_instrumented_processes{process_name="%s"}`, processName))
+			results, err := pq.Query(fmt.Sprintf(`obi_instrumented_processes{process_name="%s"}`, processName))
 			require.NoError(t, err)
 			value, err := strconv.Atoi(results[0].Value[1].(string))
 			require.NoError(t, err)

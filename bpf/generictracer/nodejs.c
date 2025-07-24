@@ -4,10 +4,12 @@
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_tracing.h>
 
+#include <logger/bpf_dbg.h>
+
 #include <maps/nodejs_fd_map.h>
 
 SEC("uprobe/node:uv_fs_access")
-int BPF_KPROBE(beyla_uv_fs_access, void *loop, void *req, const char *path) {
+int BPF_KPROBE(obi_uv_fs_access, void *loop, void *req, const char *path) {
     (void)loop;
     (void)req;
 
@@ -40,7 +42,7 @@ int BPF_KPROBE(beyla_uv_fs_access, void *loop, void *req, const char *path) {
         fd2 += buf[k_fd2_offset + i] - '0';
     }
 
-    bpf_printk("nodejs_correlation: %s, fd1 = %u, fd2 = %u", buf, fd1, fd2);
+    bpf_dbg_printk("nodejs_correlation: %s, fd1 = %u, fd2 = %u", buf, fd1, fd2);
 
     const u64 pid_tgid = bpf_get_current_pid_tgid();
     const u64 key = (pid_tgid << 32) | fd2;

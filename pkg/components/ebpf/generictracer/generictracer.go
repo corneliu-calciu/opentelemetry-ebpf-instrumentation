@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build linux
 
 package generictracer
@@ -14,16 +17,16 @@ import (
 	"github.com/gavv/monotime"
 	"github.com/vishvananda/netlink"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	ebpfcommon "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/common"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/goexec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/ifaces"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/config"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/obi"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/app/request"
+	ebpfcommon "go.opentelemetry.io/obi/pkg/components/ebpf/common"
+	"go.opentelemetry.io/obi/pkg/components/exec"
+	"go.opentelemetry.io/obi/pkg/components/goexec"
+	"go.opentelemetry.io/obi/pkg/components/imetrics"
+	"go.opentelemetry.io/obi/pkg/components/netolly/ifaces"
+	"go.opentelemetry.io/obi/pkg/components/svc"
+	"go.opentelemetry.io/obi/pkg/config"
+	"go.opentelemetry.io/obi/pkg/obi"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 Bpf ../../../../bpf/generictracer/generictracer.c -- -I../../../../bpf
@@ -147,45 +150,17 @@ func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
 }
 
 func (p *Tracer) SetupTailCalls() {
-	for _, tc := range []struct {
-		index int
-		prog  *ebpf.Program
-	}{
-		{
-			index: 0,
-			prog:  p.bpfObjects.BeylaProtocolHttp,
-		},
-		{
-			index: 1,
-			prog:  p.bpfObjects.BeylaProtocolHttp2,
-		},
-		{
-			index: 2,
-			prog:  p.bpfObjects.BeylaProtocolTcp,
-		},
-		{
-			index: 3,
-			prog:  p.bpfObjects.BeylaProtocolHttp2GrpcFrames,
-		},
-		{
-			index: 4,
-			prog:  p.bpfObjects.BeylaProtocolHttp2GrpcHandleStartFrame,
-		},
-		{
-			index: 5,
-			prog:  p.bpfObjects.BeylaProtocolHttp2GrpcHandleEndFrame,
-		},
-		{
-			index: 6,
-			prog:  p.bpfObjects.BeylaProtocolMysql,
-		},
-		{
-			index: 7,
-			prog:  p.bpfObjects.BeylaHandleBufWithArgs,
-		},
+	for i, prog := range []*ebpf.Program{
+		p.bpfObjects.ObiProtocolHttp,                      // 0
+		p.bpfObjects.ObiProtocolHttp2,                     // 1
+		p.bpfObjects.ObiProtocolTcp,                       // 2
+		p.bpfObjects.ObiProtocolHttp2GrpcFrames,           // 3
+		p.bpfObjects.ObiProtocolHttp2GrpcHandleStartFrame, // 4
+		p.bpfObjects.ObiProtocolHttp2GrpcHandleEndFrame,   // 5
+		p.bpfObjects.ObiHandleBufWithArgs,                 // 6
 	} {
-		err := p.bpfObjects.JumpTable.Update(uint32(tc.index), uint32(tc.prog.FD()), ebpf.UpdateAny)
-		if err != nil {
+		p.log.Debug("loading program into tail call jump table", "index", i, "program", prog.String())
+		if err := p.bpfObjects.JumpTable.Update(uint32(i), uint32(prog.FD()), ebpf.UpdateAny); err != nil {
 			p.log.Error("error loading info tail call jump table", "error", err)
 		}
 	}
@@ -253,74 +228,74 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 		// issues with the internal kernel code changing.
 		"sys_accept": {
 			Required: true,
-			End:      p.bpfObjects.BeylaKretprobeSysAccept4,
+			End:      p.bpfObjects.ObiKretprobeSysAccept4,
 		},
 		"sys_accept4": {
 			Required: true,
-			End:      p.bpfObjects.BeylaKretprobeSysAccept4,
+			End:      p.bpfObjects.ObiKretprobeSysAccept4,
 		},
-		"sock_alloc": {
+		"security_socket_accept": {
 			Required: true,
-			End:      p.bpfObjects.BeylaKretprobeSockAlloc,
+			Start:    p.bpfObjects.ObiKprobeSecuritySocketAccept,
 		},
 		"tcp_rcv_established": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeTcpRcvEstablished,
+			Start:    p.bpfObjects.ObiKprobeTcpRcvEstablished,
 		},
 		// Tracking of HTTP client calls, by tapping into connect
 		"sys_connect": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeSysConnect,
-			End:      p.bpfObjects.BeylaKretprobeSysConnect,
+			Start:    p.bpfObjects.ObiKprobeSysConnect,
+			End:      p.bpfObjects.ObiKretprobeSysConnect,
 		},
 		"sock_recvmsg": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeSockRecvmsg,
-			End:      p.bpfObjects.BeylaKretprobeSockRecvmsg,
+			Start:    p.bpfObjects.ObiKprobeSockRecvmsg,
+			End:      p.bpfObjects.ObiKretprobeSockRecvmsg,
 		},
 		"tcp_connect": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeTcpConnect,
+			Start:    p.bpfObjects.ObiKprobeTcpConnect,
 		},
 		"tcp_close": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeTcpClose,
+			Start:    p.bpfObjects.ObiKprobeTcpClose,
 		},
 		"tcp_sendmsg": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeTcpSendmsg,
-			End:      p.bpfObjects.BeylaKretprobeTcpSendmsg,
+			Start:    p.bpfObjects.ObiKprobeTcpSendmsg,
+			End:      p.bpfObjects.ObiKretprobeTcpSendmsg,
 		},
 		// Reading more than 160 bytes
 		"tcp_recvmsg": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeTcpRecvmsg,
-			End:      p.bpfObjects.BeylaKretprobeTcpRecvmsg,
+			Start:    p.bpfObjects.ObiKprobeTcpRecvmsg,
+			End:      p.bpfObjects.ObiKretprobeTcpRecvmsg,
 		},
 		"tcp_cleanup_rbuf": {
-			Start: p.bpfObjects.BeylaKprobeTcpCleanupRbuf, // this kprobe runs the same code as recvmsg return, we use it because kretprobes can be unreliable.
+			Start: p.bpfObjects.ObiKprobeTcpCleanupRbuf, // this kprobe runs the same code as recvmsg return, we use it because kretprobes can be unreliable.
 		},
 		"sys_clone": {
 			Required: true,
-			End:      p.bpfObjects.BeylaKretprobeSysClone,
+			End:      p.bpfObjects.ObiKretprobeSysClone,
 		},
 		"sys_clone3": {
 			Required: false,
-			End:      p.bpfObjects.BeylaKretprobeSysClone,
+			End:      p.bpfObjects.ObiKretprobeSysClone,
 		},
 		"sys_exit": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeSysExit,
+			Start:    p.bpfObjects.ObiKprobeSysExit,
 		},
 		"unix_stream_recvmsg": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeUnixStreamRecvmsg,
-			End:      p.bpfObjects.BeylaKretprobeUnixStreamRecvmsg,
+			Start:    p.bpfObjects.ObiKprobeUnixStreamRecvmsg,
+			End:      p.bpfObjects.ObiKretprobeUnixStreamRecvmsg,
 		},
 		"unix_stream_sendmsg": {
 			Required: true,
-			Start:    p.bpfObjects.BeylaKprobeUnixStreamSendmsg,
-			End:      p.bpfObjects.BeylaKretprobeUnixStreamSendmsg,
+			Start:    p.bpfObjects.ObiKprobeUnixStreamSendmsg,
+			End:      p.bpfObjects.ObiKretprobeUnixStreamSendmsg,
 		},
 	}
 
@@ -330,11 +305,11 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 		// if sk_msg is attached.
 		kp["tcp_rate_check_app_limited"] = ebpfcommon.ProbeDesc{
 			Required: false,
-			Start:    p.bpfObjects.BeylaKprobeTcpRateCheckAppLimited,
+			Start:    p.bpfObjects.ObiKprobeTcpRateCheckAppLimited,
 		}
 		kp["tcp_sendmsg_fastopen"] = ebpfcommon.ProbeDesc{
 			Required: false,
-			Start:    p.bpfObjects.BeylaKprobeTcpRateCheckAppLimited,
+			Start:    p.bpfObjects.ObiKprobeTcpRateCheckAppLimited,
 		}
 	}
 
@@ -350,50 +325,56 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 		"libssl.so": {
 			"SSL_read": {{
 				Required: false,
-				Start:    p.bpfObjects.BeylaUprobeSslRead,
-				End:      p.bpfObjects.BeylaUretprobeSslRead,
+				Start:    p.bpfObjects.ObiUprobeSslRead,
+				End:      p.bpfObjects.ObiUretprobeSslRead,
 			}},
 			"SSL_write": {{
 				Required: false,
-				Start:    p.bpfObjects.BeylaUprobeSslWrite,
-				End:      p.bpfObjects.BeylaUretprobeSslWrite,
+				Start:    p.bpfObjects.ObiUprobeSslWrite,
+				End:      p.bpfObjects.ObiUretprobeSslWrite,
 			}},
 			"SSL_read_ex": {{
 				Required: false,
-				Start:    p.bpfObjects.BeylaUprobeSslReadEx,
-				End:      p.bpfObjects.BeylaUretprobeSslReadEx,
+				Start:    p.bpfObjects.ObiUprobeSslReadEx,
+				End:      p.bpfObjects.ObiUretprobeSslReadEx,
 			}},
 			"SSL_write_ex": {{
 				Required: false,
-				Start:    p.bpfObjects.BeylaUprobeSslWriteEx,
-				End:      p.bpfObjects.BeylaUretprobeSslWriteEx,
+				Start:    p.bpfObjects.ObiUprobeSslWriteEx,
+				End:      p.bpfObjects.ObiUretprobeSslWriteEx,
 			}},
 			"SSL_shutdown": {{
 				Required: false,
-				Start:    p.bpfObjects.BeylaUprobeSslShutdown,
+				Start:    p.bpfObjects.ObiUprobeSslShutdown,
 			}},
 		},
 		"nginx": {
 			"ngx_http_upstream_init": {{ // on upstream dispatch
 				Required: false,
-				Start:    p.bpfObjects.BeylaNgxHttpUpstreamInit,
+				Start:    p.bpfObjects.ObiNgxHttpUpstreamInit,
 			}},
 			"ngx_event_connect_peer": {{
 				Required: false,
-				End:      p.bpfObjects.BeylaNgxEventConnectPeerRet,
+				End:      p.bpfObjects.ObiNgxEventConnectPeerRet,
 			}},
 		},
 		"node": {
 			"uv_fs_access": {{
 				Required: false,
-				Start:    p.bpfObjects.BeylaUvFsAccess,
+				Start:    p.bpfObjects.ObiUvFsAccess,
+			}},
+		},
+		"libuv.so": {
+			"uv_fs_access": {{
+				Required: false,
+				Start:    p.bpfObjects.ObiUvFsAccess,
 			}},
 		},
 	}
 }
 
 func (p *Tracer) SocketFilters() []*ebpf.Program {
-	return []*ebpf.Program{p.bpfObjects.BeylaSocketHttpFilter}
+	return []*ebpf.Program{p.bpfObjects.ObiSocketHttpFilter}
 }
 
 func (p *Tracer) SockMsgs() []ebpfcommon.SockMsg { return nil }

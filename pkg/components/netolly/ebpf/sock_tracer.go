@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build linux
 
 // Copyright Grafana Labs
@@ -31,8 +34,8 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"golang.org/x/sys/unix"
 
-	convenience "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/convenience"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/ringbuf"
+	convenience "go.opentelemetry.io/obi/pkg/components/ebpf/convenience"
+	"go.opentelemetry.io/obi/pkg/components/ebpf/ringbuf"
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
@@ -88,7 +91,7 @@ func NewSockFlowFetcher(
 
 	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(unix.ETH_P_ALL)))
 	if err == nil {
-		ssoErr := syscall.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, objects.BeylaSocketFilter.FD())
+		ssoErr := syscall.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, objects.ObiSocketFilter.FD())
 		if ssoErr != nil {
 			return nil, fmt.Errorf("loading and assigning BPF objects: %w", ssoErr)
 		}
@@ -145,7 +148,7 @@ func (m *SockFlowFetcher) Close() error {
 
 func (m *SockFlowFetcher) closeObjects() []error {
 	var errs []error
-	if err := m.objects.BeylaSocketFilter.Close(); err != nil {
+	if err := m.objects.ObiSocketFilter.Close(); err != nil {
 		errs = append(errs, err)
 	}
 	if err := m.objects.AggregatedFlows.Close(); err != nil {

@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package ebpfcommon
 
 import (
@@ -21,9 +24,9 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/ringbuf"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/config"
+	"go.opentelemetry.io/obi/pkg/app/request"
+	"go.opentelemetry.io/obi/pkg/components/ebpf/ringbuf"
+	"go.opentelemetry.io/obi/pkg/config"
 )
 
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 -type http_request_trace -type sql_request_trace -type http_info_t -type connection_info_t -type http2_grpc_request_t -type tcp_req_t -type kafka_client_req_t -type kafka_go_req_t -type redis_client_req_t -type tcp_large_buffer_t -type otel_span_t Bpf ../../../../bpf/common/common.c -- -I../../../../bpf
@@ -115,7 +118,7 @@ type MisclassifiedEvent struct {
 type EBPFParseContext struct {
 	h2c               *lru.Cache[uint64, h2Connection]
 	redisDBCache      *simplelru.LRU[BpfConnectionInfoT, int]
-	largeBuffers      *expirable.LRU[largeBufferKey, largeBuffer]
+	largeBuffers      *expirable.LRU[largeBufferKey, *largeBuffer]
 	mongoRequestCache *PendingMongoDBRequests
 }
 
@@ -135,7 +138,7 @@ func ptlog() *slog.Logger { return slog.With("component", "ebpf.ProcessTracer") 
 func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
 	var redisDBCache *simplelru.LRU[BpfConnectionInfoT, int]
 	h2c, _ := lru.New[uint64, h2Connection](1024 * 10)
-	largeBuffers := expirable.NewLRU[largeBufferKey, largeBuffer](1024, nil, 5*time.Minute)
+	largeBuffers := expirable.NewLRU[largeBufferKey, *largeBuffer](1024, nil, 5*time.Minute)
 
 	if cfg != nil && cfg.RedisDBCache.Enabled {
 		var err error
@@ -186,7 +189,7 @@ func ReadBPFTraceAsSpan(parseCtx *EBPFParseContext, cfg *config.EBPFTracer, reco
 	case EventTypeGoKafkaGo:
 		return ReadGoKafkaGoRequestIntoSpan(record)
 	case EventTypeTCPLargeBuffer:
-		return setTCPLargeBuffer(parseCtx, record)
+		return appendTCPLargeBuffer(parseCtx, record)
 	case EventOTelSDKGo:
 		return ReadGoOTelEventIntoSpan(record)
 	}

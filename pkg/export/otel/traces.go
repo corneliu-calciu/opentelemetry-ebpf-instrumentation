@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // TODO: remove this after batching API becomes stable
 //
 //nolint:staticcheck
@@ -41,21 +44,22 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/app/request"
+	"go.opentelemetry.io/obi/pkg/components/pipe/global"
+	"go.opentelemetry.io/obi/pkg/components/svc"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/instrumentations"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/services"
 )
 
 func tlog() *slog.Logger {
 	return slog.With("component", "otel.TracesReporter")
 }
 
-const reporterName = "github.com/open-telemetry/opentelemetry-ebpf-instrumentation"
+const reporterName = "go.opentelemetry.io/obi"
 
 type TraceSpanAndAttributes struct {
 	Span       *request.Span
@@ -75,34 +79,26 @@ type TracesConfig struct {
 	// InsecureSkipVerify is not standard, so we don't follow the same naming convention
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify" env:"OTEL_EBPF_INSECURE_SKIP_VERIFY"`
 
-	Sampler Sampler `yaml:"sampler"`
+	SamplerConfig services.SamplerConfig `yaml:"sampler"`
 
 	// Configuration options below this line will remain undocumented at the moment,
 	// but can be useful for performance-tuning of some customers.
-	//nolint:undoc
-	MaxExportBatchSize int `yaml:"max_export_batch_size" env:"OTEL_EBPF_OTLP_TRACES_MAX_EXPORT_BATCH_SIZE"`
-	//nolint:undoc
-	MaxQueueSize int `yaml:"max_queue_size" env:"OTEL_EBPF_OTLP_TRACES_MAX_QUEUE_SIZE"`
-	//nolint:undoc
-	BatchTimeout time.Duration `yaml:"batch_timeout" env:"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT"`
+	MaxExportBatchSize int           `yaml:"max_export_batch_size" env:"OTEL_EBPF_OTLP_TRACES_MAX_EXPORT_BATCH_SIZE"`
+	MaxQueueSize       int           `yaml:"max_queue_size" env:"OTEL_EBPF_OTLP_TRACES_MAX_QUEUE_SIZE"`
+	BatchTimeout       time.Duration `yaml:"batch_timeout" env:"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT"`
 
 	// Configuration options for BackOffConfig of the traces exporter.
 	// See https://github.com/open-telemetry/opentelemetry-collector/blob/main/config/configretry/backoff.go
 	// BackOffInitialInterval the time to wait after the first failure before retrying.
-	//nolint:undoc
 	BackOffInitialInterval time.Duration `yaml:"backoff_initial_interval" env:"OTEL_EBPF_BACKOFF_INITIAL_INTERVAL"`
 	// BackOffMaxInterval is the upper bound on backoff interval.
-	//nolint:undoc
 	BackOffMaxInterval time.Duration `yaml:"backoff_max_interval" env:"OTEL_EBPF_BACKOFF_MAX_INTERVAL"`
 	// BackOffMaxElapsedTime is the maximum amount of time (including retries) spent trying to send a request/batch.
-	//nolint:undoc
 	BackOffMaxElapsedTime time.Duration `yaml:"backoff_max_elapsed_time" env:"OTEL_EBPF_BACKOFF_MAX_ELAPSED_TIME"`
-	//nolint:undoc
-	ReportersCacheLen int `yaml:"reporters_cache_len" env:"OTEL_EBPF_TRACES_REPORT_CACHE_LEN"`
+	ReportersCacheLen     int           `yaml:"reporters_cache_len" env:"OTEL_EBPF_TRACES_REPORT_CACHE_LEN"`
 
 	// SDKLogLevel works independently from the global LogLevel because it prints GBs of logs in Debug mode
 	// and the Info messages leak internal details that are not usually valuable for the final user.
-	//nolint:undoc
 	SDKLogLevel string `yaml:"otel_sdk_log_level" env:"OTEL_EBPF_SDK_LOG_LEVEL"`
 
 	// OTLPEndpointProvider allows overriding the OTLP Endpoint. It needs to return an endpoint and
@@ -258,7 +254,15 @@ func GroupSpans(ctx context.Context, spans []request.Span, traceAttrs map[attr.N
 
 		finalAttrs := TraceAttributes(span, traceAttrs)
 
-		sr := sampler.ShouldSample(trace.SamplingParameters{
+		spanSampler := func() trace.Sampler {
+			if span.Service.Sampler != nil {
+				return span.Service.Sampler
+			}
+
+			return sampler
+		}
+
+		sr := spanSampler().ShouldSample(trace.SamplingParameters{
 			ParentContext: ctx,
 			Name:          span.TraceName(),
 			TraceID:       span.TraceID,
@@ -330,7 +334,7 @@ func (tr *tracesOTELReceiver) provideLoop(ctx context.Context) {
 		traceAttrs[attr.SkipSpanMetrics] = struct{}{}
 	}
 
-	sampler := tr.cfg.Sampler.Implementation()
+	sampler := tr.cfg.SamplerConfig.Implementation()
 
 	for spans := range tr.input {
 		tr.processSpans(ctx, exp, spans, traceAttrs, sampler)

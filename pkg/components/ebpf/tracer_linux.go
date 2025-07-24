@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package ebpf
 
 import (
@@ -18,12 +21,12 @@ import (
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	common "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/common"
-	convenience "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/convenience"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/goexec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/app/request"
+	common "go.opentelemetry.io/obi/pkg/components/ebpf/common"
+	convenience "go.opentelemetry.io/obi/pkg/components/ebpf/convenience"
+	"go.opentelemetry.io/obi/pkg/components/exec"
+	"go.opentelemetry.io/obi/pkg/components/goexec"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 const PinInternal = ebpf.PinType(100)
@@ -197,7 +200,8 @@ func (pt *ProcessTracer) loadTracer(eventContext *common.EBPFEventContext, p Tra
 
 	err := pt.loadAndAssign(eventContext, p)
 
-	if err != nil && strings.Contains(err.Error(), "unknown func bpf_probe_write_user") {
+	if err != nil && (strings.Contains(err.Error(), "unknown func bpf_probe_write_user") ||
+		strings.Contains(err.Error(), "cannot use helper bpf_probe_write_user")) {
 		plog.Warn("Failed to enable Go write memory distributed tracing context-propagation on a " +
 			"Linux Kernel without write memory support. " +
 			"To avoid seeing this message, please ensure you have correctly mounted /sys/kernel/security. " +

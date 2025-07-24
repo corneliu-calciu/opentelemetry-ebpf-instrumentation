@@ -1,17 +1,18 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package instrument
 
 import (
 	"context"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
+	"go.opentelemetry.io/obi/pkg/components/connector"
 )
 
 const defaultMetricsPath = "/metrics"
 
 type InternalMetricsConfig struct {
-	//nolint:undoc
-	Port int `yaml:"port,omitempty" env:"OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PORT"`
-	//nolint:undoc
+	Port int    `yaml:"port,omitempty" env:"OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PORT"`
 	Path string `yaml:"path,omitempty" env:"OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PATH"`
 }
 
