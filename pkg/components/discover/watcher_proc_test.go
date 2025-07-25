@@ -6,7 +6,6 @@ package discover
 import (
 	"bytes"
 	"context"
-	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -39,7 +38,7 @@ func TestWatcher_Poll(t *testing.T) {
 		interval: time.Microsecond,
 		cfg:      &obi.Config{},
 		pidPorts: map[pidPort]ProcessAttrs{},
-		listProcesses: func(bool, time.Duration) (map[PID]ProcessAttrs, error) {
+		listProcesses: func(bool) (map[PID]ProcessAttrs, error) {
 			invocation++
 			switch invocation {
 			case 1:
@@ -135,7 +134,7 @@ func TestProcessNotReady(t *testing.T) {
 		interval: time.Microsecond,
 		cfg:      &obi.Config{},
 		pidPorts: map[pidPort]ProcessAttrs{},
-		listProcesses: func(bool, time.Duration) (map[PID]ProcessAttrs, error) {
+		listProcesses: func(bool) (map[PID]ProcessAttrs, error) {
 			return map[PID]ProcessAttrs{p1.pid: p1, p5.pid: p5, p2.pid: p2, p3.pid: p3, p4.pid: p4}, nil
 		},
 		executableReady: func(pid PID) (string, bool) {
@@ -149,7 +148,7 @@ func TestProcessNotReady(t *testing.T) {
 		},
 	}
 
-	procs, err := acc.listProcesses(true, 0)
+	procs, err := acc.listProcesses(true)
 	require.NoError(t, err)
 	assert.Len(t, procs, 5)
 	events := acc.snapshot(procs)
@@ -186,7 +185,7 @@ func TestPortsFetchRequired(t *testing.T) {
 		cfg:      cfg,
 		interval: time.Hour, // don't let the inner loop mess with our test
 		pidPorts: map[pidPort]ProcessAttrs{},
-		listProcesses: func(bool, time.Duration) (map[PID]ProcessAttrs, error) {
+		listProcesses: func(bool) (map[PID]ProcessAttrs, error) {
 			return nil, nil
 		},
 		executableReady: func(_ PID) (string, bool) {
@@ -259,67 +258,72 @@ func sort(events []Event[ProcessAttrs]) []Event[ProcessAttrs] {
 }
 
 func TestMinProcessAge(t *testing.T) {
-	// Negative test: process is younger than minProcessAge
-	// Create a process in OS running sleep 1 second
-	process, err := os.StartProcess("/bin/sleep", []string{"/bin/sleep", "1"}, &os.ProcAttr{
-		Dir:   "/",
-		Env:   os.Environ(),
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-	})
-	require.NoError(t, err)
-	defer func() {
-		if err := process.Kill(); err != nil {
-			t.Logf("Failed to kill process1: %v", err)
+	count := 1
+	processAgeFunc = func(pid int32) time.Duration {
+		if pid == 3 {
+			return time.Duration(0)
 		}
-	}()
+		count = count + 1
+		return time.Duration(count * 1000000 * 1000)
+	}
 
-	time.Sleep(500 * time.Millisecond)
+	processPidsFunc = func() ([]int32, error) {
+		return []int32{1, 2, 3}, nil
+	}
 
-	procs, err := fetchProcessPorts(false, 5*time.Second)
+	userConfig := bytes.NewBufferString("channel_buffer_len: 33")
+	t.Setenv("OTEL_EBPF_OPEN_PORT", "8080-8089")
+
+	cfg, err := obi.LoadConfig(userConfig)
 	require.NoError(t, err)
-	// process1.Pid should not be in the map, but other processes can be
-	_, ok := procs[PID(process.Pid)]
-	assert.False(t, ok)
 
-	// Positive test: process is not older than minProcessAge but we are scanning ports
-	// Create a process in OS running sleep 3 seconds
-	process1, err := os.StartProcess("/bin/sleep", []string{"/bin/sleep", "3"}, &os.ProcAttr{
-		Dir:   "/",
-		Env:   os.Environ(),
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-	})
+	channelReturner := make(chan chan<- watcher.Event)
+
+	acc := pollAccounter{
+		cfg:      cfg,
+		interval: time.Hour, // don't let the inner loop mess with our test
+		pidPorts: map[pidPort]ProcessAttrs{},
+		listProcesses: func(bool) (map[PID]ProcessAttrs, error) {
+			return nil, nil
+		},
+		executableReady: func(_ PID) (string, bool) {
+			return "", true
+		},
+		loadBPFWatcher: func(_ context.Context, _ *ebpfcommon.EBPFEventContext, _ *obi.Config, events chan<- watcher.Event) error {
+			channelReturner <- events
+			return nil
+		},
+		loadBPFLogger: func(context.Context, *ebpfcommon.EBPFEventContext, *obi.Config) error {
+			return nil
+		},
+		stateMux:          sync.Mutex{},
+		bpfWatcherEnabled: false,
+		fetchPorts:        true,
+		findingCriteria:   FindingCriteria(cfg),
+		output:            msg.NewQueue[[]Event[ProcessAttrs]](msg.ChannelBufferLen(1)),
+	}
+
+	procs, err := fetchProcessPorts(false)
 	require.NoError(t, err)
-	defer func() {
-		if err := process1.Kill(); err != nil {
-			t.Logf("Failed to kill process1: %v", err)
-		}
-	}()
+	process, ok := procs[PID(1)]
 
-	time.Sleep(500 * time.Millisecond)
-
-	procs, err = fetchProcessPorts(true, 5*time.Second)
-	require.NoError(t, err)
-	// process1.Pid should not be in the map, but other processes can be
-	_, ok = procs[PID(process1.Pid)]
 	assert.True(t, ok)
+	assert.True(t, acc.processTooNew(process))
 
-	// Positive test: process is older than minProcessAge
-	process2, err := os.StartProcess("/bin/sleep", []string{"/bin/sleep", "3"}, &os.ProcAttr{
-		Dir:   "/",
-		Env:   os.Environ(),
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-	})
-	require.NoError(t, err)
-	defer func() {
-		if err := process2.Kill(); err != nil {
-			t.Logf("Failed to kill process2: %v", err)
-		}
-	}()
+	// Pid 3 has 0 duration meaning we had to scan it without checking duration
+	// it's never too new
+	process, ok = procs[PID(3)]
 
-	time.Sleep(2500 * time.Millisecond)
-
-	procs, err = fetchProcessPorts(true, 2*time.Second)
-	require.NoError(t, err)
-	_, ok = procs[PID(process2.Pid)]
 	assert.True(t, ok)
+	assert.False(t, acc.processTooNew(process))
+
+	for i := 0; i < 10; i++ {
+		procs, err = fetchProcessPorts(false)
+		require.NoError(t, err)
+	}
+
+	process, ok = procs[PID(1)]
+
+	assert.True(t, ok)
+	assert.False(t, acc.processTooNew(process))
 }
