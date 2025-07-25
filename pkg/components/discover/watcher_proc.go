@@ -213,6 +213,10 @@ func (pa *pollAccounter) watchForProcessEvents(ctx context.Context, log *slog.Lo
 }
 
 func (pa *pollAccounter) processTooNew(proc ProcessAttrs) bool {
+	_, existingProcess := pa.pids[proc.pid]
+	if existingProcess {
+		return false
+	}
 	// if we see duration of 0, it means we need to consider this process, since it was
 	// very likely forcibly scanned because of open ports event
 	return proc.processAge != time.Duration(0) && (proc.processAge < pa.cfg.Discovery.MinProcessAge)
