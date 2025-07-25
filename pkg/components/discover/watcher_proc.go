@@ -369,8 +369,6 @@ func fetchProcessPorts(scanPorts bool) (map[PID]ProcessAttrs, error) {
 		return nil, fmt.Errorf("can't get processes: %w", err)
 	}
 
-	log.Debug("fetch process ports", "scan", scanPorts)
-
 	for _, pid := range pids {
 		if !scanPorts {
 			processes[PID(pid)] = ProcessAttrs{pid: PID(pid), openPorts: []uint32{}, processAge: processAgeFunc(pid)}
