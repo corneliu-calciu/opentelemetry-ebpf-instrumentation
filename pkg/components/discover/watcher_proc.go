@@ -238,6 +238,7 @@ func (pa *pollAccounter) snapshot(fetchedProcs map[PID]ProcessAttrs) []Event[Pro
 			if pa.checkNewProcessNotification(pid, reportedProcs, notReadyProcs) {
 				if pa.processTooNew(proc) {
 					log.Debug("delaying process analysis, too soon", "pid", pid, "age", proc.processAge)
+					notReadyProcs[pid] = struct{}{}
 					continue
 				}
 				events = append(events, Event[ProcessAttrs]{Type: EventCreated, Obj: proc})
