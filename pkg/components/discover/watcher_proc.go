@@ -228,14 +228,14 @@ func (pa *pollAccounter) snapshot(fetchedProcs map[PID]ProcessAttrs) []Event[Pro
 	notReadyProcs := map[PID]struct{}{}
 	// notify processes that are new, or already existed but have a new connection
 	for pid, proc := range fetchedProcs {
-		if pa.processTooNew(proc) {
-			log.Debug("delaying process analysis, too soon", "pid", pid, "age", proc.processAge)
-			continue
-		}
 		// if the process does not have open ports, we might still notify it
 		// for example, if it's a client with ephemeral connections, which might be later matched by executable name
 		if len(proc.openPorts) == 0 {
 			if pa.checkNewProcessNotification(pid, reportedProcs, notReadyProcs) {
+				if pa.processTooNew(proc) {
+					log.Debug("delaying process analysis, too soon", "pid", pid, "age", proc.processAge)
+					continue
+				}
 				events = append(events, Event[ProcessAttrs]{Type: EventCreated, Obj: proc})
 				log.Debug("process added", "pid", pid)
 			}
