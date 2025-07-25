@@ -254,6 +254,9 @@ func (pa *pollAccounter) snapshot(fetchedProcs map[PID]ProcessAttrs) []Event[Pro
 			}
 		}
 	}
+
+	log.Debug("in snapshot", "pa.pids", pa.pids, "fetchedProcs", fetchedProcs)
+
 	// notify processes that are removed
 	for pid, proc := range pa.pids {
 		if _, ok := fetchedProcs[pid]; !ok {
@@ -372,6 +375,8 @@ func fetchProcessPorts(scanPorts bool) (map[PID]ProcessAttrs, error) {
 	if err != nil {
 		return nil, fmt.Errorf("can't get processes: %w", err)
 	}
+
+	log.Debug("fetch process pids", "scan", scanPorts, "pids", pids)
 
 	for _, pid := range pids {
 		if !scanPorts {
