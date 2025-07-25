@@ -341,7 +341,7 @@ func (pa *pollAccounter) checkNewProcessNotification(pid PID, reportedProcs, not
 	return false
 }
 
-// overriden in tests
+// overridden in tests
 var processAgeFunc = processAge
 
 func processAge(pid int32) time.Duration {
@@ -356,7 +356,7 @@ func processAge(pid int32) time.Duration {
 	return age
 }
 
-// overriden in tests
+// overridden in tests
 var processPidsFunc = process.Pids
 
 // fetchProcessConnections returns a map with the PIDs of all the running processes as a key,

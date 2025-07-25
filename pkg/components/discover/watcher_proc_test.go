@@ -263,7 +263,7 @@ func TestMinProcessAge(t *testing.T) {
 		if pid == 3 {
 			return time.Duration(0)
 		}
-		count = count + 1
+		count++
 		return time.Duration(count * 1000000 * 1000)
 	}
 
